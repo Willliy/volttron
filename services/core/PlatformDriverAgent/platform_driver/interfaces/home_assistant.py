@@ -114,7 +114,14 @@ class Interface(BasicRevert, BaseInterface):
         if register.read_only:
             raise IOError(
                 "Trying to write to a point configured read only: " + point_name)
-        register.value = register.reg_type(value)  # setting the value
+        try:
+            register.value = register.reg_type(value)
+        except (TypeError, ValueError):
+            if "cover." in register.entity_id and register.entity_point == "position":
+                error_msg = f"Position value for {register.entity_id} should be numeric and between 0 and 100, got: {value}"
+                _log.error(error_msg)
+                raise ValueError(error_msg)
+            raise
         entity_point = register.entity_point
         # Changing lights values in home assistant based off of register value.
         if "light." in register.entity_id:
@@ -155,6 +162,39 @@ class Interface(BasicRevert, BaseInterface):
             else:
                 _log.info(f"Currently, input_booleans only support state")
 
+        elif "cover." in register.entity_id:
+            if entity_point == "open/close":
+                normalized = str(register.value).strip().lower()
+                if normalized == "open":
+                    self.set_cover_state(register.entity_id, "open")
+                elif normalized == "close":
+                    self.set_cover_state(register.entity_id, "close")
+                else:
+                    error_msg = (f"Open/close value for {register.entity_id} should be "
+                                 f"'open' or 'close', got: {register.value}")
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+            elif entity_point == "position":
+                try:
+                    position = float(register.value)
+                except (TypeError, ValueError):
+                    error_msg = f"Position value for {register.entity_id} should be numeric, got: {register.value}"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+
+                if position < 0 or position > 100:
+                    error_msg = f"Position value for {register.entity_id} should be between 0 and 100, got: {register.value}"
+                    _log.error(error_msg)
+                    raise ValueError(error_msg)
+
+                register.value = int(position) if position.is_integer() else position
+                self.set_cover_position(register.entity_id, register.value)
+            else:
+                error_msg = (f"Only 'open/close' and 'position' entity_point values are supported "
+                             f"for cover entities, got: {entity_point}")
+                _log.error(error_msg)
+                raise ValueError(error_msg)
+
         # Changing thermostat values.
         elif "climate." in register.entity_id:
             if entity_point == "state":
@@ -180,7 +220,7 @@ class Interface(BasicRevert, BaseInterface):
                 raise ValueError(error_msg)
         else:
             error_msg = f"Unsupported entity_id: {register.entity_id}. " \
-                        f"Currently set_point is supported only for thermostats and lights"
+                        f"Currently set_point is supported only for lights, input_booleans, covers, and thermostats"
             _log.error(error_msg)
             raise ValueError(error_msg)
         return register.value
@@ -385,6 +425,42 @@ class Interface(BasicRevert, BaseInterface):
         }
 
         _post_method(url, headers, payload, f"set brightness of {entity_id} to {value}")
+
+    def set_cover_state(self, entity_id, state):
+        if not entity_id.startswith("cover."):
+            error_msg = f"{entity_id} is not a valid cover entity ID."
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+
+        service = "open_cover" if state == "open" else "close_cover"
+        url = f"http://{self.ip_address}:{self.port}/api/services/cover/{service}"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "entity_id": entity_id
+        }
+
+        _post_method(url, headers, payload, f"{service} {entity_id}")
+
+    def set_cover_position(self, entity_id, position):
+        if not entity_id.startswith("cover."):
+            error_msg = f"{entity_id} is not a valid cover entity ID."
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+
+        url = f"http://{self.ip_address}:{self.port}/api/services/cover/set_cover_position"
+        headers = {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "entity_id": entity_id,
+            "position": position,
+        }
+
+        _post_method(url, headers, payload, f"set position of {entity_id} to {position}")
 
     def set_input_boolean(self, entity_id, state):
         service = 'turn_on' if state == 'on' else 'turn_off'
