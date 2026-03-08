@@ -70,6 +70,19 @@ def _post_method(url, headers, data, operation_description):
         _log.error(err)
         raise Exception(err)
 
+class WriteStrategy:
+    def execute(self, interface, register, value):
+        raise NotImplementedError()
+
+
+class SwitchWriteStrategy(WriteStrategy):
+    def execute(self, interface, register, value):
+        raise NotImplementedError()
+
+
+class CoverWriteStrategy(WriteStrategy):
+    def execute(self, interface, register, value):
+        raise NotImplementedError()
 
 class Interface(BasicRevert, BaseInterface):
     def __init__(self, **kwargs):
@@ -79,6 +92,10 @@ class Interface(BasicRevert, BaseInterface):
         self.access_token = None
         self.port = None
         self.units = None
+        self.write_strategies = {
+            "switch": SwitchWriteStrategy(),
+            "cover": CoverWriteStrategy(),
+        }
 
     def configure(self, config_dict, registry_config_str):
         self.ip_address = config_dict.get("ip_address", None)
