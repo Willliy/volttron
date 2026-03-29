@@ -90,7 +90,8 @@ def config_store(volttron_instance, platform_driver):
     volttron_instance.add_capabilities(volttron_instance.dynamic_agent.core.publickey, capabilities)
 
     registry_config = "homeassistant_test.json"
-    registry_obj = [{
+    registry_obj = [
+    {
         "Entity ID": "input_boolean.volttrontest",
         "Entity Point": "state",
         "Volttron Point Name": "bool_state",
@@ -100,8 +101,26 @@ def config_store(volttron_instance, platform_driver):
         "Starting Value": 3,
         "Type": "int",
         "Notes": "lights hallway"
-    }]
-
+    },
+    {
+        "Entity ID": "cover.test_cover",
+        "Entity Point": "open/close",
+        "Volttron Point Name": "cover_state",
+        "Units": "",
+        "Writable": True,
+        "Starting Value": "close",
+        "Type": "string"
+    },
+    {
+        "Entity ID": "cover.test_cover",
+        "Entity Point": "position",
+        "Volttron Point Name": "cover_position",
+        "Units": "",
+        "Writable": True,
+        "Starting Value": 0,
+        "Type": "float"
+    }
+]
     volttron_instance.dynamic_agent.vip.rpc.call(CONFIGURATION_STORE,
                                                  "manage_store",
                                                  PLATFORM_DRIVER,
@@ -153,3 +172,56 @@ def platform_driver(volttron_instance):
     volttron_instance.stop_agent(platform_uuid)
     if not volttron_instance.debug_mode:
         volttron_instance.remove_agent(platform_uuid)
+
+def test_cover_open_close(volttron_instance, config_store):
+    agent = volttron_instance.dynamic_agent
+    # open
+    agent.vip.rpc.call(PLATFORM_DRIVER, 'set_point', 'home_assistant', 'cover_state', "open")
+    gevent.sleep(5)
+
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant',
+        'cover_state'
+    ).get(timeout=20)
+    # （integration test）
+    assert result is not None
+    assert isinstance(result, str)
+
+    # close
+    agent.vip.rpc.call(PLATFORM_DRIVER, 'set_point', 'home_assistant', 'cover_state', "close")
+    gevent.sleep(5)
+
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant',
+        'cover_state'
+    ).get(timeout=20)
+
+    assert result is not None
+    assert isinstance(result, str)
+
+
+def test_cover_position(volttron_instance, config_store):
+    agent = volttron_instance.dynamic_agent
+
+    agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'set_point',
+        'home_assistant',
+        'cover_position',
+        50
+    )
+    gevent.sleep(5)
+
+    result = agent.vip.rpc.call(
+        PLATFORM_DRIVER,
+        'get_point',
+        'home_assistant',
+        'cover_position'
+    ).get(timeout=20)
+
+    assert result is not None
+    assert isinstance(result, (int, float))
