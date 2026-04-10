@@ -4,7 +4,8 @@ Home Assistant Driver
 =====================
 
 The Home Assistant driver enables VOLTTRON to read any data point from any Home Assistant controlled device.
-Currently control(write access) is supported only for lights(state and brightness) and thermostats(state and temperature).
+Current write support includes lights (state and brightness), thermostats (state and temperature),
+switches (state), and covers (open/close and position).
 
 The following diagram shows interaction between platform driver agent and home assistant driver.
 
@@ -63,12 +64,23 @@ Registry Configuration
 Registry file can contain one single device and its attributes or a logical group of devices and its
 attributes. Each entry should include the full entity id of the device, including but not limited to home assistant provided prefix
 such as "light.",  "climate." etc. The driver uses these prefixes to convert states into integers.
-Like mentioned before, the driver can only control lights and thermostats but can get data from all devices
+Like mentioned before, the driver can control lights, thermostats, switches, and covers but can get data from all devices
 controlled by home assistant
 
 Each entry in a registry file should also have a 'Entity Point' and a unique value for 'Volttron Point Name'. The 'Entity ID' maps to the device instance, the 'Entity Point' extracts the attribute or state, and 'Volttron Point Name' determines the name of that point as it appears in VOLTTRON.
 
 Attributes can be located in the developer tools in the Home Assistant GUI.
+
+MVP Scope and Non-goals
++++++++++++++++++++++++
+
+The current MVP intentionally focuses on explicit, registry-driven mappings for a small set of writable Home Assistant domains.
+
+- Supported writable domains in this MVP are ``light``, ``climate``, ``switch``, ``input_boolean``, and ``cover``.
+- ``switch`` write support is limited to the ``state`` point.
+- ``cover`` write support is limited to the ``open/close`` and ``position`` points.
+- This MVP does not implement Home Assistant auto-discovery.
+- This MVP does not attempt to provide write support for every Home Assistant domain.
 
 .. image:: home-assistant.png
 
@@ -158,6 +170,64 @@ For thermostats, the state is converted into numbers as follows: "0: Off, 2: hea
        }
    ]
 
+Example Switch Registry
+***********************
+
+For Home Assistant ``switch`` entities, write support is available for the ``state`` point.
+The driver accepts ``true``/``1``/``on`` to call ``switch.turn_on`` and
+``false``/``0``/``off`` to call ``switch.turn_off``.
+
+.. code-block:: json
+
+   [
+       {
+           "Entity ID": "switch.my_switch",
+           "Entity Point": "state",
+           "Volttron Point Name": "switch_state",
+           "Units": "On / Off",
+           "Units Details": "true/1/on -> on, false/0/off -> off",
+           "Writable": true,
+           "Starting Value": false,
+           "Type": "boolean",
+           "Notes": "MVP write support for switch state"
+       }
+   ]
+
+
+Example Cover Registry
+**********************
+
+For Home Assistant ``cover`` entities, write support is available for the ``open/close`` and
+``position`` points. ``open`` calls ``cover.open_cover``, ``close`` calls ``cover.close_cover``,
+and ``position`` must be numeric in the range ``0`` to ``100``.
+
+.. code-block:: json
+
+   [
+       {
+           "Entity ID": "cover.my_cover",
+           "Entity Point": "open/close",
+           "Volttron Point Name": "cover_state",
+           "Units": "open/close",
+           "Units Details": "open -> open_cover, close -> close_cover",
+           "Writable": true,
+           "Starting Value": "close",
+           "Type": "string",
+           "Notes": "Open or close the cover"
+       },
+       {
+           "Entity ID": "cover.my_cover",
+           "Entity Point": "position",
+           "Volttron Point Name": "cover_position",
+           "Units": "%",
+           "Units Details": "0-100",
+           "Writable": true,
+           "Starting Value": 0,
+           "Type": "float",
+           "Notes": "Set cover position"
+       }
+   ]
+
 
 
 Transfer the registers files and the config files into the VOLTTRON config store using the commands below:
@@ -178,9 +248,19 @@ Upon completion, initiate the platform driver. Utilize the listener agent to ver
 
 Running Tests
 +++++++++++++++++++++++
-To run tests on the VOLTTRON home assistant driver you need to create a helper in your home assistant instance. This can be done by going to **Settings > Devices & services > Helpers > Create Helper > Toggle**. Name this new toggle **volttrontest**. After that run the pytest from the root of your VOLTTRON file.
+To run integration tests on the VOLTTRON Home Assistant driver you need a reachable Home Assistant instance and
+the relevant entity IDs. At minimum, create a helper toggle named ``volttrontest`` by going to
+**Settings > Devices & services > Helpers > Create Helper > Toggle**. If you also want to run
+``switch`` and ``cover`` integration tests, set environment variables for those entity IDs too.
 
 .. code-block:: bash
+
+    export HOMEASSISTANT_TEST_IP=<home_assistant_ip>
+    export HOMEASSISTANT_ACCESS_TOKEN=<long_lived_access_token>
+    export HOMEASSISTANT_PORT=<home_assistant_port>
+    export HOMEASSISTANT_INPUT_BOOLEAN_ENTITY_ID=input_boolean.volttrontest
+    export HOMEASSISTANT_SWITCH_ENTITY_ID=switch.my_switch
+    export HOMEASSISTANT_COVER_ENTITY_ID=cover.my_cover
     pytest volttron/services/core/PlatformDriverAgent/tests/test_home_assistant.py
 
-If everything works, you will see 6 passed tests.
+If everything works, you will see the integration tests pass for the configured entities.

@@ -24,6 +24,7 @@
 
 import json
 import logging
+import os
 import pytest
 import gevent
 
@@ -41,9 +42,12 @@ logger = logging.getLogger(__name__)
 
 # To run these tests, create a helper toggle named volttrontest in your Home Assistant instance.
 # This can be done by going to Settings > Devices & services > Helpers > Create Helper > Toggle
-HOMEASSISTANT_TEST_IP = ""
-ACCESS_TOKEN = ""
-PORT = ""
+HOMEASSISTANT_TEST_IP = os.environ.get("HOMEASSISTANT_TEST_IP", "")
+ACCESS_TOKEN = os.environ.get("HOMEASSISTANT_ACCESS_TOKEN", "")
+PORT = os.environ.get("HOMEASSISTANT_PORT", "")
+INPUT_BOOLEAN_ENTITY_ID = os.environ.get("HOMEASSISTANT_INPUT_BOOLEAN_ENTITY_ID", "input_boolean.volttrontest")
+SWITCH_ENTITY_ID = os.environ.get("HOMEASSISTANT_SWITCH_ENTITY_ID", "")
+COVER_ENTITY_ID = os.environ.get("HOMEASSISTANT_COVER_ENTITY_ID", "cover.test_cover")
 
 skip_msg = "Some configuration variables are not set. Check HOMEASSISTANT_TEST_IP, ACCESS_TOKEN, and PORT"
 
@@ -83,6 +87,25 @@ def test_set_point(volttron_instance, config_store):
     assert result == expected_values, "The result does not match the expected result."
 
 
+@pytest.mark.skipif(not SWITCH_ENTITY_ID, reason="Set HOMEASSISTANT_SWITCH_ENTITY_ID to run switch-domain integration tests")
+@pytest.mark.parametrize(
+    "value,expected_state",
+    [
+        (True, 1),
+        (False, 0),
+        ("on", 1),
+        ("off", 0),
+    ]
+)
+def test_switch_set_point(volttron_instance, config_store, value, expected_state):
+    agent = volttron_instance.dynamic_agent
+    agent.vip.rpc.call(PLATFORM_DRIVER, 'set_point', 'home_assistant', 'switch_state', value)
+    gevent.sleep(5)
+
+    result = agent.vip.rpc.call(PLATFORM_DRIVER, 'scrape_all', 'home_assistant').get(timeout=20)
+    assert result.get('switch_state') == expected_state, "The result does not match the expected switch state."
+
+
 @pytest.fixture(scope="module")
 def config_store(volttron_instance, platform_driver):
 
@@ -92,7 +115,7 @@ def config_store(volttron_instance, platform_driver):
     registry_config = "homeassistant_test.json"
     registry_obj = [
     {
-        "Entity ID": "input_boolean.volttrontest",
+        "Entity ID": INPUT_BOOLEAN_ENTITY_ID,
         "Entity Point": "state",
         "Volttron Point Name": "bool_state",
         "Units": "On / Off",
@@ -103,7 +126,7 @@ def config_store(volttron_instance, platform_driver):
         "Notes": "lights hallway"
     },
     {
-        "Entity ID": "cover.test_cover",
+        "Entity ID": COVER_ENTITY_ID,
         "Entity Point": "open/close",
         "Volttron Point Name": "cover_state",
         "Units": "",
@@ -112,7 +135,7 @@ def config_store(volttron_instance, platform_driver):
         "Type": "string"
     },
     {
-        "Entity ID": "cover.test_cover",
+        "Entity ID": COVER_ENTITY_ID,
         "Entity Point": "position",
         "Volttron Point Name": "cover_position",
         "Units": "",
@@ -121,6 +144,19 @@ def config_store(volttron_instance, platform_driver):
         "Type": "float"
     }
 ]
+    if SWITCH_ENTITY_ID:
+        registry_obj.append(
+            {
+                "Entity ID": SWITCH_ENTITY_ID,
+                "Entity Point": "state",
+                "Volttron Point Name": "switch_state",
+                "Units": "On / Off",
+                "Units Details": "true/1/on -> on, false/0/off -> off",
+                "Writable": True,
+                "Starting Value": False,
+                "Type": "boolean"
+            }
+        )
     volttron_instance.dynamic_agent.vip.rpc.call(CONFIGURATION_STORE,
                                                  "manage_store",
                                                  PLATFORM_DRIVER,

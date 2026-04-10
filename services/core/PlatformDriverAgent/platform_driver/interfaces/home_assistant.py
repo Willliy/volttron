@@ -97,6 +97,52 @@ class Interface(BasicRevert, BaseInterface):
             "cover": CoverWriteStrategy(),
         }
 
+    @staticmethod
+    def _normalize_binary_state(entity_id, value):
+        if isinstance(value, bool):
+            return "on" if value else "off"
+
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return "on" if int(value) == 1 else "off"
+
+        normalized = str(value).strip().lower()
+        if normalized in ("1", "true", "on"):
+            return "on"
+        if normalized in ("0", "false", "off"):
+            return "off"
+
+        error_msg = (f"State value for {entity_id} should be "
+                     f"true/1/on or false/0/off, got: {value}")
+        _log.error(error_msg)
+        raise ValueError(error_msg)
+
+    @staticmethod
+    def _normalize_cover_command(entity_id, value):
+        normalized = str(value).strip().lower()
+        if normalized in ("open", "close"):
+            return normalized
+
+        error_msg = (f"Open/close value for {entity_id} should be "
+                     f"'open' or 'close', got: {value}")
+        _log.error(error_msg)
+        raise ValueError(error_msg)
+
+    @staticmethod
+    def _normalize_cover_position(entity_id, value):
+        try:
+            position = float(value)
+        except (TypeError, ValueError):
+            error_msg = f"Position value for {entity_id} should be numeric, got: {value}"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+
+        if position < 0 or position > 100:
+            error_msg = f"Position value for {entity_id} should be between 0 and 100, got: {value}"
+            _log.error(error_msg)
+            raise ValueError(error_msg)
+
+        return int(position) if position.is_integer() else position
+
     def configure(self, config_dict, registry_config_str):
         self.ip_address = config_dict.get("ip_address", None)
         self.access_token = config_dict.get("access_token", None)
@@ -131,17 +177,13 @@ class Interface(BasicRevert, BaseInterface):
         if register.read_only:
             raise IOError(
                 "Trying to write to a point configured read only: " + point_name)
-        try:
-            register.value = register.reg_type(value)
-        except (TypeError, ValueError):
-            if "cover." in register.entity_id and register.entity_point == "position":
-                error_msg = f"Position value for {register.entity_id} should be numeric and between 0 and 100, got: {value}"
-                _log.error(error_msg)
-                raise ValueError(error_msg)
-            raise
         entity_point = register.entity_point
         # Changing lights values in home assistant based off of register value.
         if "light." in register.entity_id:
+            try:
+                register.value = register.reg_type(value)
+            except (TypeError, ValueError):
+                raise
             if entity_point == "state":
                 if isinstance(register.value, int) and register.value in [0, 1]:
                     if register.value == 1:
@@ -167,22 +209,19 @@ class Interface(BasicRevert, BaseInterface):
 
         elif "switch." in register.entity_id:
             if entity_point == "state":
-                normalized = str(register.value).strip().lower()
-                if normalized in ("1", "true", "on"):
-                    self.set_switch(register.entity_id, "on")
-                elif normalized in ("0", "false", "off"):
-                    self.set_switch(register.entity_id, "off")
-                else:
-                    error_msg = (f"State value for {register.entity_id} should be "
-                                 f"true/1/on or false/0/off, got: {register.value}")
-                    _log.error(error_msg)
-                    raise ValueError(error_msg)
+                normalized = self._normalize_binary_state(register.entity_id, value)
+                register.value = normalized
+                self.set_switch(register.entity_id, normalized)
             else:
                 error_msg = f"Only 'state' entity_point is supported for switch entities, got: {entity_point}"
                 _log.error(error_msg)
                 raise ValueError(error_msg)
 
         elif "input_boolean." in register.entity_id:
+            try:
+                register.value = register.reg_type(value)
+            except (TypeError, ValueError):
+                raise
             if entity_point == "state":
                 if isinstance(register.value, int) and register.value in [0, 1]:
                     if register.value == 1:
@@ -198,30 +237,11 @@ class Interface(BasicRevert, BaseInterface):
 
         elif "cover." in register.entity_id:
             if entity_point == "open/close":
-                normalized = str(register.value).strip().lower()
-                if normalized == "open":
-                    self.set_cover_state(register.entity_id, "open")
-                elif normalized == "close":
-                    self.set_cover_state(register.entity_id, "close")
-                else:
-                    error_msg = (f"Open/close value for {register.entity_id} should be "
-                                 f"'open' or 'close', got: {register.value}")
-                    _log.error(error_msg)
-                    raise ValueError(error_msg)
+                normalized = self._normalize_cover_command(register.entity_id, value)
+                register.value = normalized
+                self.set_cover_state(register.entity_id, normalized)
             elif entity_point == "position":
-                try:
-                    position = float(register.value)
-                except (TypeError, ValueError):
-                    error_msg = f"Position value for {register.entity_id} should be numeric, got: {register.value}"
-                    _log.error(error_msg)
-                    raise ValueError(error_msg)
-
-                if position < 0 or position > 100:
-                    error_msg = f"Position value for {register.entity_id} should be between 0 and 100, got: {register.value}"
-                    _log.error(error_msg)
-                    raise ValueError(error_msg)
-
-                register.value = int(position) if position.is_integer() else position
+                register.value = self._normalize_cover_position(register.entity_id, value)
                 self.set_cover_position(register.entity_id, register.value)
             else:
                 error_msg = (f"Only 'open/close' and 'position' entity_point values are supported "
@@ -231,6 +251,10 @@ class Interface(BasicRevert, BaseInterface):
 
         # Changing thermostat values.
         elif "climate." in register.entity_id:
+            try:
+                register.value = register.reg_type(value)
+            except (TypeError, ValueError):
+                raise
             if entity_point == "state":
                 if isinstance(register.value, int) and register.value in [0, 2, 3, 4]:
                     if register.value == 0:
@@ -370,7 +394,7 @@ class Interface(BasicRevert, BaseInterface):
             self.point_name = regDef['Volttron Point Name']
             self.units = regDef['Units']
             description = regDef.get('Notes', '')
-            default_value = ("Starting Value")
+            default_value = regDef.get("Starting Value")
             type_name = regDef.get("Type", 'string')
             reg_type = type_mapping.get(type_name, str)
             attributes = regDef.get('Attributes', {})
@@ -388,7 +412,7 @@ class Interface(BasicRevert, BaseInterface):
                 description=description)
 
             if default_value is not None:
-                self.set_default(self.point_name, register.value)
+                self.set_default(self.point_name, default_value)
 
             self.insert_register(register)
 
